@@ -1,10 +1,15 @@
 import numpy as np
 from scipy.optimize import brentq
+import yfinance as yf
+import pandas as pd
+from datetime import datetime, timedelta
+from multiprocessing import Pool, cpu_count
 
 
 class RUniversalPortfolio:
     def __init__(self, n_stocks, epsilon=None, eta=None, T=None, A=100,
-                 m=None, S=None, delta=None, delta_0=None, use_damping=True):
+                 m=None, S=None, delta=None, delta_0=None, use_damping=True,
+                 n_processes=None, use_parallel=False):
         '''
         R-UNIVERSAL Portfolio Algorithm
 
@@ -26,32 +31,35 @@ class RUniversalPortfolio:
         :param delta: Grid spacing (Mode 2)
         :param delta_0: Minimum coordinate value (Mode 2)
         :param use_damping: If True, use Q_t (with damping); if False, use P_t
+        :param n_processes: Number of parallel processes (None = auto-detect)
+        :param use_parallel: Enable multiprocessing (recommended for m > 100)
         '''
 
         self.n = n_stocks
         self.use_damping = use_damping
+        self.use_parallel = use_parallel
+        self.n_processes = n_processes if n_processes else cpu_count()
         self.t = 0
         self.current_portfolio = np.ones(n_stocks) / n_stocks
         self.price_relatives_history = []
 
-        # Determine which mode to use
+        # Find mode (either manual or theoretical)
         manual_params_provided = all(x is not None for x in [m, S, delta, delta_0])
         theoretical_params_provided = all(x is not None for x in [epsilon, eta, T])
 
         if manual_params_provided:
-            # Mode 2: Use manual parameters
             self.mode = "manual"
             self.m = m
             self.S = S
             self.delta = delta
             self.delta_0 = delta_0
-            self.epsilon = epsilon  # Store for reference (may be None)
+            # Keeping values (can be None)
+            self.epsilon = epsilon
             self.eta = eta
             self.T = T
             self.A = A
 
         elif theoretical_params_provided:
-            # Mode 1: Calculate from theoretical bounds
             self.mode = "theoretical"
             self.epsilon = epsilon
             self.eta = eta
@@ -132,37 +140,35 @@ class RUniversalPortfolio:
             return min(0.01, np.sqrt(target_value * 10))
 
     def _print_config(self):
-        """Print configuration"""
-        print(f"\n{'=' * 70}")
         print(f"R-UNIVERSAL Portfolio Configuration")
-        print(f"{'=' * 70}")
-        print(f"Mode:        {self.mode}")
-        print(f"Stocks:      {self.n}")
-        print(f"Damping:     {'ENABLED (Q_t)' if self.use_damping else 'DISABLED (P_t)'}")
+        print(f"Mode: {self.mode}")
+        print(f"Stocks: {self.n}")
+        print(f"Damping: {'ENABLED (Q_t)' if self.use_damping else 'DISABLED (P_t)'}")
+        print(f"Parallel: {'YES ({} processes)'.format(self.n_processes) if self.use_parallel else 'NO'}")
 
         if self.mode == "theoretical":
             print(f"\nTheoretical Parameters:")
             print(f"  epsilon = {self.epsilon}")
-            print(f"  eta     = {self.eta}")
-            print(f"  T       = {self.T}")
-            print(f"  A       = {self.A}")
+            print(f"  eta = {self.eta}")
+            print(f"  T = {self.T}")
+            print(f"  A = {self.A}")
 
         print(f"\nAlgorithm Parameters:")
         print(f"  delta_0 = {self.delta_0:.6e}")
-        print(f"  delta   = {self.delta:.6e}")
-        print(f"  m       = {self.m:,}")
-        print(f"  S       = {self.S:,}")
+        print(f"  delta = {self.delta:.6e}")
+        print(f"  m = {self.m:,}")
+        print(f"  S = {self.S:,}")
 
         if self.m > 1e6 or self.S > 1e6:
-            print(f"\n⚠️  WARNING: Parameters are very large!")
-            print(f"   Consider using manual mode with smaller values")
+            print(f"  ⚠️  Large computational requirements")
 
-        print(f"{'=' * 70}\n")
+        if not self.use_parallel and self.m > 100:
+            print(f"  💡 Consider use_parallel=True for m > 100")
 
     def P_t(self, portfolio):
         """
         Cumulative wealth function P_t(b)
-        P_t(b) = ∏(i=1 to t) b·x_i
+        P_t(b) = PRODUCT(i=1 to t) b·x_i
         """
         if len(self.price_relatives_history) == 0:
             return 1.0
@@ -178,6 +184,8 @@ class RUniversalPortfolio:
         """
         Damped wealth function Q_t(b)
         Q_t(b) = P_t(b) * min(exp((b_n - 2*delta_0)/(n*delta)), 1)
+
+        Only used when use_damping=True
         """
         P_t_value = self.P_t(portfolio)
 
@@ -193,59 +201,38 @@ class RUniversalPortfolio:
 
     def _wealth_function(self, portfolio):
         """Choose between P_t and Q_t based on use_damping"""
-        return self.Q_t(portfolio)
+        return self.Q_t(portfolio) if self.use_damping else self.P_t(portfolio)
 
     def _random_walk_step(self, r):
         """
         One step of Metropolis-Hastings random walk
 
-        With damping (use_damping=True):
-            - Pick coordinate j from {0, ..., n-2}
-            - Adjust j and coordinate n to maintain sum=1
+        Acceptance: min(1, wealth_proposed / wealth_current)
 
-        Without damping (use_damping=False):
-            - Pick ANY two different coordinates i, j
-            - Increase one, decrease the other
-            This is more symmetric (as suggested in Section 7)
+        Two modes:
+        1. Asymmetric (use_damping=True): Pick j from {0,...,n-2}, pair with last coord
+        2. Symmetric (use_damping=False): Pick any two different coordinates
         """
+        coords = np.random.choice(self.n, size=2, replace=False)
+        i, j = coords[0], coords[1]
+
         if self.use_damping:
-            # Original algorithm: treat coordinate n specially
-            j = np.random.randint(0, self.n - 1)
-            X = np.random.choice([-1, 1])
+            i = -1  # Always pair with last coordinate
 
-            new_r = r.copy()
-            new_r[j] += X * self.delta
-            new_r[-1] -= X * self.delta
+        X = np.random.choice([-1, 1])
+        new_r = r.copy()
+        new_r[j] += X * self.delta
+        new_r[i] -= X * self.delta
 
-            # Check constraints
-            if new_r[j] >= self.delta_0 and new_r[-1] >= self.delta_0:
-                wealth_current = self._wealth_function(r)
-                wealth_proposed = self._wealth_function(new_r)
+        # Check constraints
+        if new_r[j] >= self.delta_0 and new_r[i] >= self.delta_0:
+            wealth_current = self._wealth_function(r)
+            wealth_proposed = self._wealth_function(new_r)
 
-                if wealth_proposed > 0:
-                    acceptance_prob = min(1.0, wealth_current / wealth_proposed)
-                    if np.random.random() < acceptance_prob:
-                        return new_r
-        else:
-            # Without damping: pick ANY two coordinates (more symmetric)
-            # Pick two different coordinates
-            coords = np.random.choice(self.n, size=2, replace=False)
-            i, j = coords[0], coords[1]
-            X = np.random.choice([-1, 1])
-
-            new_r = r.copy()
-            new_r[i] += X * self.delta
-            new_r[j] -= X * self.delta
-
-            # Check constraints
-            if new_r[i] >= self.delta_0 and new_r[j] >= self.delta_0:
-                wealth_current = self._wealth_function(r)
-                wealth_proposed = self._wealth_function(new_r)
-
-                if wealth_proposed > 0:
-                    acceptance_prob = min(1.0, wealth_current / wealth_proposed)
-                    if np.random.random() < acceptance_prob:
-                        return new_r
+            if wealth_current > 0 and wealth_proposed > 0:
+                acceptance_prob = min(1.0, wealth_proposed / wealth_current)
+                if np.random.random() < acceptance_prob:
+                    return new_r
 
         return r
 
@@ -257,26 +244,37 @@ class RUniversalPortfolio:
         # Snap to grid
         r = np.round(r / self.delta) * self.delta
         r = np.maximum(r, self.delta_0)
-        r = r / np.sum(r)  # Renormalize to ensure sum = 1
+        r = r / np.sum(r)  # Renormalize
 
-        # Take S steps of random walk
+        # Perform S steps of random walk
         for _ in range(self.S):
             r = self._random_walk_step(r)
 
         return r
 
+    def _sample_portfolio_wrapper(self, _):
+        """Wrapper for multiprocessing (ignores dummy argument)"""
+        return self._sample_portfolio()
+
     def update(self, price_relatives):
         """
-        Update portfolio based on today's price relatives
+        Update portfolio AFTER observing today's price relatives
+
+        Uses multiprocessing if use_parallel=True
 
         :param price_relatives: Array[n] of price relatives (close/open)
-        :return: New portfolio allocation
+        :return: Portfolio for NEXT day
         """
         self.price_relatives_history.append(price_relatives.copy())
         self.t += 1
 
-        # Generate m samples
-        samples = np.array([self._sample_portfolio() for _ in range(self.m)])
+        # Generate m samples (parallel or sequential)
+        if self.use_parallel:
+            with Pool(processes=self.n_processes) as pool:
+                samples = pool.map(self._sample_portfolio_wrapper, range(self.m))
+            samples = np.array(samples)
+        else:
+            samples = np.array([self._sample_portfolio() for _ in range(self.m)])
 
         # Average samples (approximates the integral in Definition 1)
         self.current_portfolio = np.mean(samples, axis=0)
@@ -285,38 +283,103 @@ class RUniversalPortfolio:
         return self.current_portfolio.copy()
 
     def get_portfolio(self):
-        """Get current portfolio allocation"""
+        """Get current portfolio for trading (BEFORE seeing today's prices)"""
         return self.current_portfolio.copy()
 
-    def get_cumulative_wealth(self):
-        """Calculate cumulative wealth of current portfolio"""
-        return self.P_t(self.current_portfolio)
+    def simulate_trading(self, price_relatives_sequence, verbose=True):
+        """
+        Simulate trading over a sequence of days
+
+        :param price_relatives_sequence: List of price relative arrays
+        :param verbose: Print progress
+        :return: Dictionary with performance metrics
+        """
+        wealth = 1.0
+        daily_wealth = [1.0]
+        portfolios_used = []
+
+        for day, price_relatives in enumerate(price_relatives_sequence):
+            # Use current portfolio for today's trading
+            portfolio = self.get_portfolio()
+            portfolios_used.append(portfolio.copy())
+
+            # Calculate today's return
+            daily_return = np.dot(portfolio, price_relatives)
+            wealth *= daily_return
+            daily_wealth.append(wealth)
+
+            # Update for next day
+            self.update(price_relatives)
+
+            if verbose and ((day + 1) % 10 == 0 or day == 0):
+                print(f"Day {day + 1}: Wealth = {wealth:.4f}")
+
+        return {
+            'final_wealth': wealth,
+            'daily_wealth': np.array(daily_wealth),
+            'portfolios_used': np.array(portfolios_used),
+            'num_days': len(price_relatives_sequence)
+        }
 
 
 if __name__ == '__main__':
-    portfolio1 = RUniversalPortfolio(
-        n_stocks=3,
-        epsilon=0.2,
-        eta=0.1,
-        T=10,
-        A=100,
-        use_damping=True
-    )
+    stocks = ["AAPL", "TSLA", "NVDA"]
 
-    portfolio2 = RUniversalPortfolio(
-        n_stocks=3,
-        m=100,
-        S=1000,
+    # Define time periods
+    end_date = datetime.now()
+    test_start = end_date - timedelta(days=30)  # Last month for testing
+    train_start = test_start - timedelta(days=365)  # One year before
+
+    print("Downloading stock data")
+    data = yf.download(stocks, start=train_start, end=end_date, auto_adjust=True)['Close']
+    price_relatives = (data / data.shift(1)).dropna().values
+
+    # Split into train and test
+    train_end_idx = len(data[data.index < test_start]) - 1
+    train_price_relatives = price_relatives[:train_end_idx]
+    test_price_relatives = price_relatives[train_end_idx:]
+
+    print(f"\nTrain period: {len(train_price_relatives)}")
+    print(f"Test period: {len(test_price_relatives)}")
+
+    # Portfolio Initialization
+    portfolio = RUniversalPortfolio(
+        n_stocks=len(stocks),
+        m=50,
+        S=500,
         delta=0.01,
         delta_0=1e-6,
-        use_damping=True
+        use_damping=False,
+        use_parallel=True,
+        n_processes=4
     )
 
-    portfolio3 = RUniversalPortfolio(
-        n_stocks=3,
-        m=100,
-        S=1000,
-        delta=0.01,
-        delta_0=1e-6,
-        use_damping=False
-    )
+    train_results = portfolio.simulate_trading(train_price_relatives, verbose=True)
+    train_wealth = train_results['final_wealth']
+
+    print("\nTesting\n")
+
+    test_wealth = 1.0
+    for day, price_rel in enumerate(test_price_relatives):
+        current_portfolio = portfolio.get_portfolio()
+        daily_return = np.dot(current_portfolio, price_rel)
+        test_wealth *= daily_return
+        portfolio.update(price_rel)
+
+        print(f"Test Day {day + 1}: Wealth = {test_wealth:.4f}, " +
+              f"Portfolio = [{', '.join([f'{x:.3f}' for x in current_portfolio])}]")
+
+    print("\n" + "=" * 70)
+    print("FINAL RESULTS")
+    print("=" * 70)
+    print(f"Train wealth: {train_wealth:.4f} ({(train_wealth - 1) * 100:.2f}% gain)")
+    print(f"Test wealth: {test_wealth:.4f} ({(test_wealth - 1) * 100:.2f}% gain)")
+    print(f"Total wealth: {train_wealth * test_wealth:.4f}")
+    print(f"Final portfolio: [{', '.join([f'{x:.3f}' for x in portfolio.get_portfolio()])}]")
+
+    # Compare to buy-and-hold
+    train_bh = np.mean(np.prod(train_price_relatives, axis=0))
+    test_bh = np.mean(np.prod(test_price_relatives, axis=0))
+    print(f"\nBuy-and-hold (equal weight) train: {train_bh:.4f}")
+    print(f"Buy-and-hold (equal weight) test: {test_bh:.4f}")
+    print(f"Universal vs B&H ratio: {test_wealth / test_bh:.4f}")
