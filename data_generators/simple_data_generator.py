@@ -7,7 +7,7 @@ def generate_stock_data(initial_value, total_steps,
                         min_flat_steps=0, max_flat_steps=10,
                         step_size=1):
     """
-    Simple data generator with alterning up/down movements
+    Simple data generator with changin up/down movements
 
     - initial_value: Starting stock price
     - total_steps: Total number of time steps
