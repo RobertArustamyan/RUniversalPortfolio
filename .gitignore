@@ -3,3 +3,5 @@
 
 plots/threshold/
 !plots/threshold/adaptive_extrema.png
+
+get_project_structure.py
