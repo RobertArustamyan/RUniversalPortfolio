@@ -4,6 +4,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 from multiprocessing import Pool, cpu_count
+from benchmarks.compare_strategies import compare_strategies
 
 
 class RUniversalPortfolio:
@@ -345,13 +346,13 @@ if __name__ == '__main__':
     # Portfolio Initialization
     portfolio = RUniversalPortfolio(
         n_stocks=len(stocks),
-        m=50,
-        S=500,
+        m=250,
+        S=8000,
         delta=0.01,
         delta_0=1e-6,
         use_damping=False,
         use_parallel=True,
-        n_processes=4
+        n_processes=6
     )
 
     train_results = portfolio.simulate_trading(train_price_relatives, verbose=True)
@@ -359,27 +360,45 @@ if __name__ == '__main__':
 
     print("\nTesting\n")
 
-    test_wealth = 1.0
+    # test_wealth = 1.0
+    # for day, price_rel in enumerate(test_price_relatives):
+    #     current_portfolio = portfolio.get_portfolio()
+    #     daily_return = np.dot(current_portfolio, price_rel)
+    #     test_wealth *= daily_return
+    #     portfolio.update(price_rel)
+    #
+    #     print(f"Test Day {day + 1}: Wealth = {test_wealth:.4f}, " +
+    #           f"Portfolio = [{', '.join([f'{x:.3f}' for x in current_portfolio])}]")
+
+    test_daily_wealth = [train_results['daily_wealth'][-1]]  # Start from final train wealth
+    test_wealth_current = train_results['daily_wealth'][-1]
+
     for day, price_rel in enumerate(test_price_relatives):
         current_portfolio = portfolio.get_portfolio()
         daily_return = np.dot(current_portfolio, price_rel)
-        test_wealth *= daily_return
+        test_wealth_current *= daily_return
+        test_daily_wealth.append(test_wealth_current)
         portfolio.update(price_rel)
 
-        print(f"Test Day {day + 1}: Wealth = {test_wealth:.4f}, " +
+        print(f"Test Day {day + 1}: Wealth = {test_wealth_current:.4f}, " +
               f"Portfolio = [{', '.join([f'{x:.3f}' for x in current_portfolio])}]")
 
-    print("\n" + "=" * 70)
-    print("FINAL RESULTS")
-    print("=" * 70)
-    print(f"Train wealth: {train_wealth:.4f} ({(train_wealth - 1) * 100:.2f}% gain)")
-    print(f"Test wealth: {test_wealth:.4f} ({(test_wealth - 1) * 100:.2f}% gain)")
-    print(f"Total wealth: {train_wealth * test_wealth:.4f}")
-    print(f"Final portfolio: [{', '.join([f'{x:.3f}' for x in portfolio.get_portfolio()])}]")
+    combined_daily_wealth = np.concatenate([
+        train_results['daily_wealth'][:-1],  # Exclude last train day (it's first test day)
+        test_daily_wealth
+    ])
 
-    # Compare to buy-and-hold
-    train_bh = np.mean(np.prod(train_price_relatives, axis=0))
-    test_bh = np.mean(np.prod(test_price_relatives, axis=0))
-    print(f"\nBuy-and-hold (equal weight) train: {train_bh:.4f}")
-    print(f"Buy-and-hold (equal weight) test: {test_bh:.4f}")
-    print(f"Universal vs B&H ratio: {test_wealth / test_bh:.4f}")
+    runiversal_results = {
+        'strategy': 'R-Universal',
+        'daily_wealth': combined_daily_wealth,
+        'final_wealth': test_wealth_current
+    }
+
+    all_price_relatives = np.vstack([train_price_relatives, test_price_relatives])
+    results = compare_strategies(
+        all_price_relatives,
+        stock_names=stocks,
+        show_plot=True,
+        save_path='portfolio_comparison.png',
+        additional_results=runiversal_results
+    )
