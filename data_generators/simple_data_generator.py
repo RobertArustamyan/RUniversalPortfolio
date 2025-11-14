@@ -7,9 +7,8 @@ def generate_stock_data(initial_value, total_steps,
                         min_flat_steps=0, max_flat_steps=10,
                         step_size=1):
     """
-    Generate stock price data with alternating up/down movements.
+    Simple data generator with alterning up/down movements
 
-    Parameters:
     - initial_value: Starting stock price
     - total_steps: Total number of time steps
     - min_oscillation_steps: Minimum steps to move away from initial value
@@ -17,30 +16,27 @@ def generate_stock_data(initial_value, total_steps,
     - min_flat_steps: Minimum steps to stay flat at initial value
     - max_flat_steps: Maximum steps to stay flat at initial value
     - step_size: Amount to change per step (+/- this value)
-
-    Returns:
-    - Array of stock prices over time
     """
     prices = [initial_value]
     current_value = initial_value
     t = 0
 
-    # Random initial wait time
+    # Random wait time
     initial_wait = np.random.randint(min_flat_steps, max_flat_steps + 1)
 
-    # Stay at initial value for initial wait time
+    # Stay at initial value for first wait time
     for _ in range(min(initial_wait, total_steps - 1)):
         prices.append(initial_value)
         t += 1
 
-    # Random first direction: +1 for up, -1 for down
+
     direction = np.random.choice([1, -1])
 
     while t < total_steps - 1:
-        # Duration of oscillation (how many steps away from initial value)
+        # Duration of oscillation
         oscillation_steps = np.random.randint(min_oscillation_steps, max_oscillation_steps + 1)
 
-        # Move in current direction
+        # Move in selected direction
         for _ in range(min(oscillation_steps, total_steps - 1 - t)):
             current_value += direction * step_size
             prices.append(current_value)
@@ -57,7 +53,6 @@ def generate_stock_data(initial_value, total_steps,
             prices.append(current_value)
             t += 1
 
-        # Ensure we're exactly at initial value
         current_value = initial_value
 
         # Random flat period at initial value
@@ -74,9 +69,9 @@ def generate_stock_data(initial_value, total_steps,
     return np.array(prices)
 
 def prices_to_price_relatives(prices):
-    """Convert price series to price relatives (p_t / p_{t-1})"""
+    """Convert price series to price relatives"""
     price_relatives = prices[1:] / prices[:-1]
-    # Handle any division by zero or invalid values
+
     price_relatives = np.nan_to_num(price_relatives, nan=1.0, posinf=1.0, neginf=1.0)
     return price_relatives
 
