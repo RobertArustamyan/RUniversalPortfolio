@@ -6,9 +6,9 @@ Plots all strategies together for easy comparison.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from benchmarks.buy_and_hold import run_buy_and_hold
-from benchmarks.constant_rebalance_portfolio import run_crp
-from benchmarks.best_constant_rebalanced_portfolio import run_bcrp
+from benchmarks.portfolio.buy_and_hold import run_buy_and_hold
+from benchmarks.portfolio.constant_rebalance_portfolio import run_crp
+from benchmarks.portfolio.best_constant_rebalanced_portfolio import run_bcrp
 
 
 def compare_strategies(price_relatives, stock_names=None, crp_weights=None,
