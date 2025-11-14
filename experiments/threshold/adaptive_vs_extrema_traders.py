@@ -95,5 +95,6 @@ if __name__ == "__main__":
     ax_price.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(f"{path}/{fig_name}.png")
+    if save_plot:
+        plt.savefig(f"{path}/{fig_name}.png")
     plt.show()

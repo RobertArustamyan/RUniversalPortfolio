@@ -1,2 +1,5 @@
 .venv/
 .idea/
+
+plots/threshold/
+!plots/threshold/adaptive_extrema.png
