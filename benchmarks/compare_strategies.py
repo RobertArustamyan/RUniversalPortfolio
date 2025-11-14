@@ -73,9 +73,17 @@ def plot_comparison(results, save_path=None):
 
     # Define base strategies with their styles
     base_strategies = {
-        'BAH': {'label': 'Buy and Hold', 'marker': 'o', 'linewidth': 2},
-        'CRP': {'label': 'CRP (Uniform)', 'marker': 's', 'linewidth': 2},
-        'BCRP': {'label': 'BCRP (Best in hindsight)', 'marker': '^', 'linewidth': 2}
+        'BAH': {'label': 'BAH', 'marker': 'o', 'linewidth': 2},
+        'CRP': {
+            'label': f"CRP, W={[f'{w:.2f}' for w in results['CRP']['weights']]}",
+            'marker': 's',
+            'linewidth': 2
+        },
+        'BCRP': {
+            'label': f"BCRP, W={[f'{w:.2f}' for w in results['BCRP']['best_weights']]}",
+            'marker': '^',
+            'linewidth': 2
+        }
     }
 
     # Plot base strategies

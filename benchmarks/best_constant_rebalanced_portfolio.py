@@ -2,7 +2,6 @@
 Best Constant Rebalanced Portfolio (BCRP)
 Finds the CRP weights that would have performed best in hindsight.
 """
-
 import numpy as np
 from scipy.optimize import minimize
 
@@ -50,12 +49,11 @@ class BestConstantRebalancedPortfolio:
         n_stocks = price_relatives.shape[1]
 
         def objective(weights):
-            """Negative log wealth (minimize this)"""
-            # Use log for numerical stability
+            # Take log and negate in order to convert mult to sum and minimize instead of maximizing
             log_wealth = np.sum(np.log(np.dot(weights, price_relatives.T)))
             return -log_wealth
 
-        # Constraints: weights sum to 1, all weights >= 0
+        # Constraints: sum of weights equal 1, all weights >= 0
         constraints = [
             {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
         ]

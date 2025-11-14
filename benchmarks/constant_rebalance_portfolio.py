@@ -2,7 +2,6 @@
 Constant Rebalanced Portfolio (CRP) Strategy
 Fixed portfolio weights by rebalancing at the end of each day
 """
-
 import numpy as np
 
 
