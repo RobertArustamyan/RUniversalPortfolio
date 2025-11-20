@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.optimize import minimize
 
 
 class Barrons:
@@ -23,7 +24,7 @@ class Barrons:
 
         self.A_t = self.n_stocks * np.eye(self.n_stocks)
 
-        self.x_history.append(self.x_t)
+        self.x_history.append(self.x_t.copy())
 
     def _check_config(self):
         if self.beta <= 0 or self.beta > 0.5:
@@ -68,5 +69,44 @@ class Barrons:
 
         return first_term + second_term
 
-    def _mirror_descent_update(self, gradient):
-        pass
+    def _bregman_divergence(self, x, y):
+        phi_x = self._phi_t_regularized(x)
+        phi_y = self._phi_t_regularized(y)
+        grad_phi_y = self._gradient_phi_t_regularized(y)
+
+        return phi_x - phi_y - np.dot(grad_phi_y, (x - y))
+
+    def _x_update(self, gradient):
+        def objective(x):
+            return np.dot(x,gradient) + self._bregman_divergence(x, self.x_t)
+
+        bounds = [(self.x_min, 1.0) for _ in range(self.n_stocks)] # All values should be at least x_min
+
+        constraints = {'type': 'eq', 'fun': lambda x: sum(x) - 1} # Constraint for sum of values (to be equal to 1)
+
+        x0 = self.x_t.copy()
+
+        result = minimize(objective, x0, bounds=bounds, constraints=constraints)
+
+        if not result.success:
+            print("Solver was not able to converge")
+            # TODO
+            # Implement some fallback logic
+        return result.x
+
+    def update(self, r_t):
+        # Step 1: compute gradient of the loss
+        loss_gradient = self._compute_gradient(r_t)
+        # Step 2: update matrix A
+        self._update_matrix_a(loss_gradient)
+        # Step 3: update eta's
+        self._update_eta_t()
+
+        # Step 4: calculate x_{t+1}
+        x_next = self._x_update(loss_gradient)
+
+        self.x_t = x_next
+        self.x_history.append(self.x_t.copy())
+        self.loss_history.append(-np.log(np.dot(self.x_t, r_t)))
+
+        return self.x_t.copy()
