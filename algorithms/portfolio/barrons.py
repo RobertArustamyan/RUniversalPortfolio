@@ -54,7 +54,6 @@ class Barrons:
 
     def _phi_t_regularized(self, x):
         x = np.asarray(x, dtype=float)
-        x = np.maximum(x, self.x_min)
 
         first_term = 0.5 * self.beta * float(x.T @ (self.A_t @ x))
         second_term = np.sum((1 / self.eta_t) * np.log(1.0 / x))
@@ -96,6 +95,7 @@ class Barrons:
 
     def update(self, r_t):
         # Step 1: compute gradient of the loss
+        current_loss = -np.log(np.dot(self.x_t, r_t))
         loss_gradient = self._compute_gradient(r_t)
         # Step 2: update matrix A
         self._update_matrix_a(loss_gradient)
@@ -107,6 +107,34 @@ class Barrons:
 
         self.x_t = x_next
         self.x_history.append(self.x_t.copy())
-        self.loss_history.append(-np.log(np.dot(self.x_t, r_t)))
+        self.loss_history.append(current_loss)
 
         return self.x_t.copy()
+
+    def simulate_trading(self, price_relatives_sequence, verbose=True):
+        wealth = 1.0
+        daily_wealth = [1.0]
+        portfolios_used = []
+
+        for day, r_t in enumerate(price_relatives_sequence):
+            portfolio = self.x_t.copy()
+            portfolios_used.append(portfolio.copy())
+
+            # wealth update based on portfolio chosen before seeing r_t
+            daily_return = np.dot(portfolio, r_t)
+            wealth *= daily_return
+            daily_wealth.append(wealth)
+
+            # update portfolio for next round
+            self.update(r_t)
+
+            if verbose and ((day + 1) % 10 == 0 or day == 0):
+                print(f"Day {day + 1}: Wealth = {wealth:.4f}")
+
+
+        return {
+            'final_wealth': wealth,
+            'daily_wealth': np.array(daily_wealth),
+            'portfolios_used': np.array(portfolios_used),
+            'num_days': len(price_relatives_sequence)
+        }
