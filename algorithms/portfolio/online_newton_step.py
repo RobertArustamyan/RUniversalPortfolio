@@ -65,21 +65,24 @@ class OnlineNewtonStep:
         self.A += np.outer(grad, grad)
         self.b += (1 + 1.0 / self.beta) * grad
 
-        # A_reg = self.A + 1e-8 * np.eye(self.n_stocks)  # Added additional term for regularization preventing ill cond.
-
         try:
-            # A_inv = np.linalg.inv(A_reg)
             A_inv = np.linalg.inv(self.A)
             q = self.delta * A_inv @ self.b
+            self.p_t = self._project_to_simplex(q, self.A)
 
-            # q = np.clip(q, -10, 10)
+        except (np.linalg.LinAlgError, RuntimeError) as e:
+            print(f"Warning: {type(e).__name__}, using regularization")
 
-        except np.linalg.LinAlgError:
-            print("Warning, singular matrix")
-            q = self.p_t
+            A_reg = self.A + 1e-6 * np.eye(self.n_stocks)
 
-        # self.p_t = self._project_to_simplex(q, A_reg)
-        self.p_t = self._project_to_simplex(q, self.A)
+            try:
+                A_inv = np.linalg.inv(A_reg)
+                q = self.delta * A_inv @ self.b
+                q = np.clip(q, -10, 10)
+                self.p_t = self._project_to_simplex(q, A_reg)
+
+            except (np.linalg.LinAlgError, RuntimeError) as e2:
+                print(f"Warning: Regularization also failed ({type(e2).__name__}), keeping previous portfolio")
 
     def simulate_trading(self, price_relatives_sequence, verbose=True, verbose_days=100):
         wealth = 1.0
