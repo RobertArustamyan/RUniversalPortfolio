@@ -1,140 +1,183 @@
 import numpy as np
-from scipy.optimize import minimize
+import cvxpy as cp
 
 
 class Barrons:
-    def __init__(self, n_stocks, beta, eta, T):
+    def __init__(self, n_stocks, T, beta, eta):
         self.n_stocks = n_stocks
-        self.beta = beta
-        self.eta = eta
         self.T = T
+        self.eta = eta
+        self.beta = beta
+        self._check_parameters()
 
-        self.x_history = []
-        self.loss_history = []
+        self.x_min = 1 / (n_stocks * T)
+        self.x_0 = np.ones(n_stocks) / n_stocks
+        # Current portfolio state
+        self.x_t = self.x_0.copy()
+        self.A = np.eye(n_stocks) * n_stocks
 
-        self._initialize()
-        self._check_config()
-        self._print_config()
+        # History
+        self.observed_loss = []
+        self.portfolios_used = []
 
-    def _initialize(self):
-        self.x_t = np.ones(self.n_stocks) / self.n_stocks
-
-        # Define restricted simplex: x_i >= 1/(N*T)
-        self.x_min = 1 / (self.n_stocks * self.T)
-
-        self.A_t = self.n_stocks * np.eye(self.n_stocks)
-
-        self.x_history.append(self.x_t.copy())
-
-    def _check_config(self):
+    def _check_parameters(self):
         if self.beta <= 0 or self.beta > 0.5:
-            raise ValueError("Beta must be between 0 and 1/2")
-
+            raise ValueError(f"Invalid beta value: {self.beta}")
         if self.eta <= 0 or self.eta > 1:
-            raise ValueError("Eta must be between 0 and 1")
+            raise ValueError(f"Invalid eta value: {self.eta}")
 
-    def _print_config(self):
-        print(f"BARRONS Configuration")
-        print(f"Beta: {self.beta}")
-        print(f"Eta: {self.eta}")
-        print(f"N stocks: {self.n_stocks}")
-        print(f"Rounds (T): {self.T}")
+    def get_portfolio(self):
+        """Return portfolio for trading"""
+        return self.x_t
 
-    def _update_eta_t(self):
-        past_x = np.array(self.x_history)
+    def _calculate_loss(self, r_t):
+        return -np.log(np.dot(self.x_t, r_t))
 
-        max_term = np.max(np.log(1 / (self.n_stocks * past_x)) / np.log(self.T), axis=0)
-        self.eta_t = self.eta * np.exp(max_term)
+    def _compute_eta_t(self):
+        portfolio_hist = np.array(self.portfolios_used)
+        values = 1.0 / (self.n_stocks * portfolio_hist)
 
-    def _compute_gradient(self, r_t):
-        return -r_t / np.dot(self.x_t, r_t)
+        log_T_values = np.log(values) / np.log(self.T)
+        max_values = np.max(log_T_values, axis=0)
 
-    def _update_matrix_a(self, gradient):
-        self.A_t += np.outer(gradient, gradient)
+        return self.eta * np.exp(max_values)
 
-    def _phi_t_regularized(self, x):
-        x = np.asarray(x, dtype=float)
+    def _psi(self, x):
+        x = np.asarray(x)
 
-        first_term = 0.5 * self.beta * float(x.T @ (self.A_t @ x))
-        second_term = np.sum((1 / self.eta_t) * np.log(1.0 / x))
+        first_term = (0.5 * self.beta) * (x @ self.A @ x)
+        second_term = np.sum((1.0 / self.eta_t) * np.log(1.0 / x))
 
         return first_term + second_term
 
-    def _gradient_phi_t_regularized(self, x):
-        x = np.asarray(x, dtype=float)
+    def _grad_psi(self, x):
+        x = np.asarray(x)
 
-        first_term = self.beta * (self.A_t @ x)
-        second_term = -(1 / self.eta_t) * (1 / x)
+        first_term = self.beta * (self.A @ x)
+        second_term = -1.0 / (self.eta_t * x)
 
         return first_term + second_term
 
     def _bregman_divergence(self, x, y):
-        phi_x = self._phi_t_regularized(x)
-        phi_y = self._phi_t_regularized(y)
-        grad_phi_y = self._gradient_phi_t_regularized(y)
+        grad_y = self._grad_psi(y)
+        psi_x = self._psi(x)
+        psi_y = self._psi(y)
 
-        return phi_x - phi_y - np.dot(grad_phi_y, (x - y))
+        return psi_x - psi_y - np.dot(grad_y, x - y)
 
-    def _x_update(self, gradient):
-        def objective(x):
-            return np.dot(x,gradient) + self._bregman_divergence(x, self.x_t)
+    # def _solve_ipm(self, grad_t):
+    #     n = self.n_stocks
+    #     x = cp.Variable(n)
+    #
+    #     # gradient of psi at x_t (numpy vector!)
+    #     grad_psi_xt = self._grad_psi(self.x_t)
+    #
+    #     # Build ψ(x) in CVXPY form:
+    #     quad_term = 0.5 * self.beta * cp.quad_form(x, self.A)
+    #     ent_term = cp.sum(cp.multiply((1.0 / self.eta_t), cp.log(1.0 / x)))
+    #     psi_expr = quad_term + ent_term
+    #
+    #     # Linearization term:
+    #     linear_term = grad_t - grad_psi_xt  # constant vector
+    #     objective = cp.Minimize(linear_term @ x + psi_expr)
+    #
+    #     constraints = [cp.sum(x) == 1, x >= self.x_min]
+    #
+    #     prob = cp.Problem(objective, constraints)
+    #     prob.solve(solver=cp.ECOS,
+    #                warm_start=True,
+    #                abstol=1e-8, reltol=1e-6, feastol=1e-8)
+    #
+    #     if x.value is None:
+    #         raise RuntimeError("IPM solver failed")
+    #
+    #     # Projection safety
+    #     x_val = np.maximum(x.value, self.x_min)
+    #     x_val /= x_val.sum()
+    #     return x_val
 
-        bounds = [(self.x_min, 1.0) for _ in range(self.n_stocks)] # All values should be at least x_min
+    def _solve_ipm(self, grad_t):
+        n = self.n_stocks
+        x = cp.Variable(n)
 
-        constraints = {'type': 'eq', 'fun': lambda x: sum(x) - 1} # Constraint for sum of values (to be equal to 1)
+        # gradient of psi at x_t (numpy vector!)
+        grad_psi_xt = self._grad_psi(self.x_t)
 
-        x0 = self.x_t.copy()
+        quad_term = 0.5 * self.beta * cp.quad_form(x, self.A)
+        ent_term_lin = cp.sum(cp.multiply(-1.0 / (self.eta_t * self.x_t), x - self.x_t))
+        psi_expr = quad_term + ent_term_lin
 
-        result = minimize(objective, x0, bounds=bounds, constraints=constraints)
+        # Linearization term:
+        linear_term = grad_t - grad_psi_xt  # constant vector
+        objective = cp.Minimize(linear_term @ x + psi_expr)
 
-        if not result.success:
-            print("Solver was not able to converge")
-            # TODO
-            # Implement some fallback logic
-        return result.x
+        constraints = [cp.sum(x) == 1, x >= self.x_min]
+
+        prob = cp.Problem(objective, constraints)
+        prob.solve(solver=cp.CVXOPT, verbose=False)
+
+        if x.value is None:
+            raise RuntimeError("IPM solver failed")
+
+        # Projection safety
+        x_val = np.maximum(x.value, self.x_min)
+        x_val /= x_val.sum()
+        return x_val
 
     def update(self, r_t):
-        # Step 1: compute gradient of the loss
-        current_loss = -np.log(np.dot(self.x_t, r_t))
-        loss_gradient = self._compute_gradient(r_t)
-        # Step 2: update matrix A
-        self._update_matrix_a(loss_gradient)
-        # Step 3: update eta's
-        self._update_eta_t()
+        x_used = self.portfolios_used[-1]
+        grad_t = -r_t / np.dot(x_used, r_t)
 
-        # Step 4: calculate x_{t+1}
-        x_next = self._x_update(loss_gradient)
+        self.A += np.outer(grad_t, grad_t)
+        self.eta_t = self._compute_eta_t()
 
-        self.x_t = x_next
-        self.x_history.append(self.x_t.copy())
-        self.loss_history.append(current_loss)
+        self.x_t = self._solve_ipm(grad_t)
 
-        return self.x_t.copy()
 
-    def simulate_trading(self, price_relatives_sequence, verbose=True):
+    def simulate_trading(self, price_relatives_sequence, verbose=True, verbose_days=100):
         wealth = 1.0
         daily_wealth = [1.0]
-        portfolios_used = []
 
         for day, r_t in enumerate(price_relatives_sequence):
-            portfolio = self.x_t.copy()
-            portfolios_used.append(portfolio.copy())
+            # Get portfolio for current day
+            portfolio = self.get_portfolio()
+            self.portfolios_used.append(portfolio.copy())
 
-            # wealth update based on portfolio chosen before seeing r_t
+            loss = self._calculate_loss(r_t)
+            self.observed_loss.append(loss.copy())
+
             daily_return = np.dot(portfolio, r_t)
             wealth *= daily_return
             daily_wealth.append(wealth)
 
-            # update portfolio for next round
+            # Update for next day
             self.update(r_t)
-
-            if verbose and ((day + 1) % 10 == 0 or day == 0):
-                print(f"Day {day + 1}: Wealth = {wealth:.4f}")
-
+            if verbose and ((day + 1) % verbose_days == 0 or day == 0):
+                print(f"Day {day + 1}: Wealth = {wealth:.4f}, "
+                      f"Portfolio = [{', '.join([f'{x:.3f}' for x in portfolio])}]")
 
         return {
             'final_wealth': wealth,
             'daily_wealth': np.array(daily_wealth),
-            'portfolios_used': np.array(portfolios_used),
+            'portfolios_used': np.array(self.portfolios_used),
             'num_days': len(price_relatives_sequence)
         }
+
+
+if __name__ == "__main__":
+    import yfinance as yf
+    from datetime import datetime, timedelta
+    barrons = Barrons(n_stocks=3, T=100, beta=0.1, eta=0.1)
+
+    stocks = ["AAPL", "TSLA", "MSFT"]
+
+    # Define time periods
+    end_date = datetime.now()
+    test_start = end_date - timedelta(days=1)  # Last year for testing
+    train_start = test_start - timedelta(days=4)  # 2 years before
+
+    print("Downloading stock data")
+    data = yf.download(stocks, start=train_start, end=end_date, auto_adjust=True)['Close']
+    price_relatives = (data / data.shift(1)).dropna().values
+
+    barrons.simulate_trading(price_relatives)

@@ -6,7 +6,7 @@ from utils.data_prep import prepare_stock_data
 
 if __name__ == '__main__':
     # Settings for saving results
-    save_plot = True
+    save_plot = False
     path = '../../plots/portfolio'
     fig_name = 'ons_5stocks'
 
@@ -15,8 +15,8 @@ if __name__ == '__main__':
 
     data_dict = prepare_stock_data(
         stocks=["AAPL", "TSLA", "MSFT", "NVDA", "GOOGL"],
-        train_days=7000,
-        test_days=2500
+        train_days=700,
+        test_days=350
     )
 
     train_price_relatives = data_dict['train_price_relatives']

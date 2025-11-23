@@ -26,10 +26,6 @@ class OnlineNewtonStep:
         self.A = np.eye(n_stocks)
         self.b = np.zeros(n_stocks)
 
-        # History
-        self.portfolios_used = []
-        self.daily_wealth = [1.0]
-
     def _project_to_simplex(self, x, M):
         m = M.shape[0]
         P = matrix(2 * M)

@@ -269,7 +269,7 @@ class RUniversalPortfolio:
             self.update(price_relatives)
 
             if verbose and ((day + 1) % 10 == 0 or day == 0):
-                print(f"Day {day + 1}: Wealth = {wealth:.4f}")
+                print(f"Day {day + 1}: Wealth = {wealth:.4f}: Portfolio = {portfolio}")
 
         return {
             'final_wealth': wealth,
