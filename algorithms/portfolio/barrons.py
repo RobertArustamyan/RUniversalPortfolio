@@ -72,7 +72,6 @@ class Barrons:
     #     # gradient of psi at x_t (numpy vector!)
     #     grad_psi_xt = self._grad_psi(self.x_t)
     #
-    #     # Build ψ(x) in CVXPY form:
     #     quad_term = 0.5 * self.beta * cp.quad_form(x, self.A)
     #     ent_term = cp.sum(cp.multiply((1.0 / self.eta_t), cp.log(1.0 / x)))
     #     psi_expr = quad_term + ent_term
@@ -91,7 +90,6 @@ class Barrons:
     #     if x.value is None:
     #         raise RuntimeError("IPM solver failed")
     #
-    #     # Projection safety
     #     x_val = np.maximum(x.value, self.x_min)
     #     x_val /= x_val.sum()
     #     return x_val
