@@ -100,15 +100,13 @@ class Barrons:
         n = self.n_stocks
         x = cp.Variable(n)
 
-        # gradient of psi at x_t (numpy vector!)
         grad_psi_xt = self._grad_psi(self.x_t)
 
         quad_term = 0.5 * self.beta * cp.quad_form(x, self.A)
         ent_term_lin = cp.sum(cp.multiply(-1.0 / (self.eta_t * self.x_t), x - self.x_t))
         psi_expr = quad_term + ent_term_lin
 
-        # Linearization term:
-        linear_term = grad_t - grad_psi_xt  # constant vector
+        linear_term = grad_t - grad_psi_xt
         objective = cp.Minimize(linear_term @ x + psi_expr)
 
         constraints = [cp.sum(x) == 1, x >= self.x_min]
@@ -117,9 +115,8 @@ class Barrons:
         prob.solve(solver=cp.CVXOPT, verbose=False)
 
         if x.value is None:
-            raise RuntimeError("IPM solver failed")
+            raise RuntimeError("Solver failed")
 
-        # Projection safety
         x_val = np.maximum(x.value, self.x_min)
         x_val /= x_val.sum()
         return x_val
@@ -162,22 +159,3 @@ class Barrons:
             'portfolios_used': np.array(self.portfolios_used),
             'num_days': len(price_relatives_sequence)
         }
-
-
-if __name__ == "__main__":
-    import yfinance as yf
-    from datetime import datetime, timedelta
-    barrons = Barrons(n_stocks=3, T=100, beta=0.1, eta=0.1)
-
-    stocks = ["AAPL", "TSLA", "MSFT"]
-
-    # Define time periods
-    end_date = datetime.now()
-    test_start = end_date - timedelta(days=1)  # Last year for testing
-    train_start = test_start - timedelta(days=4)  # 2 years before
-
-    print("Downloading stock data")
-    data = yf.download(stocks, start=train_start, end=end_date, auto_adjust=True)['Close']
-    price_relatives = (data / data.shift(1)).dropna().values
-
-    barrons.simulate_trading(price_relatives)
