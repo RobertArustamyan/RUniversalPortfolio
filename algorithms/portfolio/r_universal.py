@@ -2,12 +2,12 @@ from multiprocessing import Pool, cpu_count
 
 import numpy as np
 from scipy.optimize import brentq
-
+np.set_printoptions(threshold=np.inf, precision=4, suppress=True)
 
 class RUniversalPortfolio:
     def __init__(self, n_stocks, epsilon=None, eta=None, T=None, A=None,
                  m=None, S=None, delta=None, delta_0=None, use_damping=True,
-                 n_processes=None, use_parallel=False):
+                 n_processes=None, use_parallel=False, verbose=False):
         '''
         R-UNIVERSAL Portfolio Algorithm
 
@@ -23,6 +23,7 @@ class RUniversalPortfolio:
         :param use_damping: If True, use Q_t (with damping); if False, use P_t
         :param n_processes: # of paralel processes
         :param use_parallel: Enable multiprocessing
+        :param verbose: For portfolio/wealth tracing
         '''
 
         self.n = n_stocks
@@ -32,6 +33,8 @@ class RUniversalPortfolio:
         self.t = 0
         self.current_portfolio = np.ones(n_stocks) / n_stocks
         self.price_relatives_history = []
+
+        self.verbose = True
 
         # Find mode (manual or theoretical)
         manual_params_provided = all(x is not None for x in [m, S, delta, delta_0])
@@ -244,6 +247,14 @@ class RUniversalPortfolio:
         # Average samples
         self.current_portfolio = np.mean(samples, axis=0)
         self.current_portfolio /= np.sum(self.current_portfolio)
+
+        if self.verbose:
+            wealths = np.array([self._wealth_function(sample) for sample in samples])
+
+            for i, (sample, wealth) in enumerate(zip(samples, wealths)):
+                print(f"Sample {i + 1}: Portfolio = {sample}, Wealth = {wealth:.6f}")
+
+            print("Portfolio mean: ", self.current_portfolio)
 
         return self.current_portfolio.copy()
 
