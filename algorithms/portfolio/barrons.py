@@ -65,35 +65,6 @@ class Barrons:
 
         return psi_x - psi_y - np.dot(grad_y, x - y)
 
-    # def _solve_ipm(self, grad_t):
-    #     n = self.n_stocks
-    #     x = cp.Variable(n)
-    #
-    #     # gradient of psi at x_t (numpy vector!)
-    #     grad_psi_xt = self._grad_psi(self.x_t)
-    #
-    #     quad_term = 0.5 * self.beta * cp.quad_form(x, self.A)
-    #     ent_term = cp.sum(cp.multiply((1.0 / self.eta_t), cp.log(1.0 / x)))
-    #     psi_expr = quad_term + ent_term
-    #
-    #     # Linearization term:
-    #     linear_term = grad_t - grad_psi_xt  # constant vector
-    #     objective = cp.Minimize(linear_term @ x + psi_expr)
-    #
-    #     constraints = [cp.sum(x) == 1, x >= self.x_min]
-    #
-    #     prob = cp.Problem(objective, constraints)
-    #     prob.solve(solver=cp.ECOS,
-    #                warm_start=True,
-    #                abstol=1e-8, reltol=1e-6, feastol=1e-8)
-    #
-    #     if x.value is None:
-    #         raise RuntimeError("IPM solver failed")
-    #
-    #     x_val = np.maximum(x.value, self.x_min)
-    #     x_val /= x_val.sum()
-    #     return x_val
-
     def _solve_ipm(self, grad_t):
         n = self.n_stocks
         x = cp.Variable(n)
